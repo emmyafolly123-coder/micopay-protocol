@@ -242,6 +242,30 @@ export async function tradeRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /trades/:id/merchant-confirm
+   * El comercio escanea el QR del usuario. Valida trade, participante, estado y
+   * expiración, y quema el `claim_token` del QR (SEC-02) para que un mismo
+   * código no sirva dos veces. Devuelve el resumen para la pantalla de
+   * confirmación — no mueve fondos.
+   */
+  app.post('/trades/:id/merchant-confirm', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['claim_token'],
+        properties: {
+          claim_token: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (request) => {
+    const { id } = request.params as { id: string };
+    const { claim_token } = request.body as { claim_token: string };
+    return tradeService.merchantConfirmScan(request, id, request.user.id, claim_token);
+  });
+
+  /**
    * GET /merchants/me/trades
    * List incoming trades for the authenticated merchant, filtered by state.
    * Returns trades where merchant is the seller, newest first.

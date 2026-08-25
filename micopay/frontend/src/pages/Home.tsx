@@ -131,25 +131,29 @@ const Home = ({
   }, []);
 
   const MXN_PEGGED = new Set(['MXNE', 'MXNe', 'CETES', 'GTOKEN', 'MXN']);
-  const xlmRate = xlmMxnRate ?? 2.5;
-  const usdRate = usdMxnRate ?? 17.5;
 
-  const totalMxn = tokens.reduce((sum, t) => {
-    if (t.code === 'XLM') return sum + t.balance * xlmRate;
-    if (t.code === 'USDC') return sum + t.balance * usdRate;
-    if (MXN_PEGGED.has(t.code)) return sum + t.balance;
-    return sum;
-  }, 0);
+  // Sin cotización no se muestra un monto: un FX inventado sobre dinero real da
+  // cifras equivocadas (docs/AUDIT_MOBILE_MAINNET.md §3).
+  const ratesReady = xlmMxnRate != null && usdMxnRate != null && !rateError;
 
-  const mxnBalance = balanceLoading || rateLoading
+  const totalMxn = ratesReady
+    ? tokens.reduce((sum, t) => {
+        if (t.code === 'XLM') return sum + t.balance * xlmMxnRate!;
+        if (t.code === 'USDC') return sum + t.balance * usdMxnRate!;
+        if (MXN_PEGGED.has(t.code)) return sum + t.balance;
+        return sum;
+      }, 0)
+    : null;
+
+  const mxnBalance = balanceLoading || rateLoading || totalMxn == null
     ? "—"
     : `$${totalMxn.toLocaleString("es-MX", { maximumFractionDigits: 2 })} MXN`;
 
   // Per-asset MXN value for the XLM row (its own value, not the grand total).
   const rawXlm = tokens.find((t) => t.code === 'XLM')?.balance ?? 0;
-  const xlmMxnValue = balanceLoading || rateLoading
+  const xlmMxnValue = balanceLoading || rateLoading || rateError || xlmMxnRate == null
     ? "—"
-    : `$${(rawXlm * xlmRate).toLocaleString("es-MX", { maximumFractionDigits: 2 })} MXN`;
+    : `$${(rawXlm * xlmMxnRate).toLocaleString("es-MX", { maximumFractionDigits: 2 })} MXN`;
 
   const today = new Date().toLocaleDateString("es-MX", {
     weekday: "long",

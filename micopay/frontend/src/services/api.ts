@@ -262,10 +262,14 @@ export async function revealTrade(
   );
 }
 
+/**
+ * Devuelve el QR de cobro del vendedor. El payload lleva un token opaco de un
+ * solo uso, no el preimage HTLC (SEC-02).
+ */
 export async function getSecret(
     tradeId: string,
     sellerToken: string,
-): Promise<{ secret: string; qr_payload: string }> {
+): Promise<{ qr_payload: string; expires_at: string; expires_in: number }> {
   const res = await http.get(
       `/trades/${tradeId}/secret`,
       authHeaders(sellerToken),
@@ -406,10 +410,22 @@ export interface XlmMxnRate {
   rate: number;
   source: string;
   fetchedAt: string;
+  /** true cuando se sirvió la última cotización conocida porque las fuentes fallaron. */
+  stale?: boolean;
 }
 
 export async function getXlmMxnRate(): Promise<XlmMxnRate> {
   const res = await http.get('/rate/xlm-mxn');
+  return res.data;
+}
+
+/**
+ * USDC→MXN desde el backend (multi-fuente + caché). El frontend nunca debe
+ * llevar un FX literal: si esto falla, la UI muestra "—"
+ * (docs/AUDIT_MOBILE_MAINNET.md §3).
+ */
+export async function getUsdcMxnRate(): Promise<XlmMxnRate> {
+  const res = await http.get('/rate/usdc-mxn');
   return res.data;
 }
 
@@ -654,12 +670,13 @@ export interface MerchantConfirmResult {
  */
 export async function merchantConfirmScan(
   tradeId: string,
+  claimToken: string,
   token: string,
 ): Promise<MerchantConfirmResult> {
   try {
     const res = await http.post(
       `/trades/${tradeId}/merchant-confirm`,
-      {},
+      { claim_token: claimToken },
       authHeaders(token),
     );
     return res.data as MerchantConfirmResult;

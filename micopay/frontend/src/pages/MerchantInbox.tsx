@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQRScanner } from '../hooks/useQRScanner';
+import { useCountdown } from '../hooks/useCountdown';
 import {
   getMerchantTrades,
   merchantConfirmScan,
@@ -30,34 +31,6 @@ const STATUS_ICONS: Record<string, string> = {
   refunded: 'undo',
 };
 
-// ── Countdown hook ─────────────────────────────────────────────────────────
-
-function useCountdown(expiresAt: string | null) {
-  const [remaining, setRemaining] = useState('');
-
-  useEffect(() => {
-    if (!expiresAt) return;
-
-    const tick = () => {
-      const diff = new Date(expiresAt).getTime() - Date.now();
-      if (diff <= 0) {
-        setRemaining('Expirado');
-        return;
-      }
-      const h = Math.floor(diff / 3_600_000);
-      const m = Math.floor((diff % 3_600_000) / 60_000);
-      const s = Math.floor((diff % 60_000) / 1000);
-      setRemaining(h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`);
-    };
-
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [expiresAt]);
-
-  return remaining;
-}
-
 // ── Scan state machine ─────────────────────────────────────────────────────
 
 type ScanView =
@@ -77,7 +50,8 @@ function TradeConfirmationCard({
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
-  const countdown = useCountdown(data.expires_at);
+  const { label: countdownLabel, expired } = useCountdown(data.expires_at);
+  const countdown = expired ? 'Expirado' : countdownLabel;
   const statusColor = STATUS_COLORS[data.status] || 'bg-gray-100 text-gray-800';
   const statusLabel = t(`home.status.${data.status}`, { defaultValue: data.status });
   const statusIcon = STATUS_ICONS[data.status] || 'info';
@@ -285,20 +259,22 @@ const MerchantInbox = ({ token, onBack }: MerchantInboxProps) => {
       return;
     }
 
-    // The merchant scans the buyer's release QR, which carries the trade_id.
-    const tradeId =
-      parsed.payload.type === 'release' ? parsed.payload.tradeId : null;
+    // The merchant scans the buyer's release QR: trade_id + a one-time claim
+    // token. The HTLC preimage never travels in the QR (SEC-02).
+    const release = parsed.payload.type === 'release' ? parsed.payload : null;
 
-    if (!tradeId) {
+    if (!release) {
       setScanView({ type: 'parse_error', message: 'No se encontró un ID de trade en el QR' });
       return;
     }
+
+    const tradeId = release.tradeId;
 
     // Validate with backend.
     setScanView({ type: 'loading' });
 
     try {
-      const result = await merchantConfirmScan(tradeId, token);
+      const result = await merchantConfirmScan(tradeId, release.claimToken, token);
       setScanView({ type: 'confirmation', data: result });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Error al verificar el intercambio';

@@ -35,7 +35,8 @@
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.8",
     "react-router-dom": "^6.28.0",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "xrpl": "^5.0.0"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
