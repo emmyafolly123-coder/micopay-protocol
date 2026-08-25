@@ -9,6 +9,7 @@ import SupportLink from '../components/SupportLink';
 import { mapApiError, type MappedApiError } from '../utils/apiError';
 import { getDemoQrPayload, IS_DEMO_MODE } from '../utils/demoMode';
 import { buildTxUrl } from '../utils/stellarExplorer';
+import { useCountdown } from '../hooks/useCountdown';
 
 interface QRRevealProps {
     activeTrade: TradeData | null;
@@ -28,6 +29,7 @@ interface QRRevealProps {
 const QRReveal = ({ activeTrade, sellerToken, buyerToken, amount, counterpartyName, ownName, onBack, onChat, onSuccess }: QRRevealProps) => {
     const { t } = useTranslation();
     const [qrPayload, setQrPayload] = useState<string | null>(null);
+    const [qrExpiresAt, setQrExpiresAt] = useState<string | null>(null);
     const [secretLoaded, setSecretLoaded] = useState(false);
     const [secretLoading, setSecretLoading] = useState(false);
     const [secretError, setSecretError] = useState<MappedApiError | null>(null);
@@ -53,8 +55,9 @@ const QRReveal = ({ activeTrade, sellerToken, buyerToken, amount, counterpartyNa
             // Swallow errors here: if the trade was already revealed (stale
             // local status), the reveal call 409s but getSecret still works.
             await revealTrade(activeTrade.id, sellerToken).catch(() => {});
-            const { qr_payload } = await getSecret(activeTrade.id, sellerToken);
+            const { qr_payload, expires_at } = await getSecret(activeTrade.id, sellerToken);
             setQrPayload(qr_payload);
+            setQrExpiresAt(expires_at);
             setSecretLoaded(true);
 
             const fresh = await getTrade(activeTrade.id, sellerToken).catch(() => null);
@@ -62,6 +65,7 @@ const QRReveal = ({ activeTrade, sellerToken, buyerToken, amount, counterpartyNa
         } catch (e) {
             if (IS_DEMO_MODE) {
                 setQrPayload(getDemoQrPayload());
+                setQrExpiresAt(null);
                 setSecretLoaded(true);
             } else {
                 setSecretError(mapApiError(e));
@@ -113,7 +117,11 @@ const QRReveal = ({ activeTrade, sellerToken, buyerToken, amount, counterpartyNa
 
 
 
-    const showQr = secretLoaded && qrPayload && !secretError;
+    // UX_MANIFESTO, pantalla QR: "make expiration visible". El código caduca
+    // antes que el trade, así que expirado NO significa fondos perdidos —
+    // basta con pedir uno nuevo.
+    const { label: qrCountdown, expired: qrExpired } = useCountdown(qrExpiresAt);
+    const showQr = secretLoaded && qrPayload && !secretError && !qrExpired;
 
     return (
         <div className="bg-surface font-body text-on-surface min-h-screen">
@@ -201,6 +209,18 @@ const QRReveal = ({ activeTrade, sellerToken, buyerToken, amount, counterpartyNa
                             supportTradeId={activeTrade?.id}
                             supportState="QR_REVEAL_SECRET"
                         />
+                    ) : qrExpired ? (
+                        <div className="flex flex-col items-center gap-4 py-10">
+                            <span aria-hidden="true" className="material-symbols-outlined text-outline text-4xl">timer_off</span>
+                            <p className="text-sm font-semibold text-on-surface">{t('qrReveal.codeExpired')}</p>
+                            <p className="text-xs text-outline max-w-xs">{t('qrReveal.codeExpiredFunds')}</p>
+                            <button
+                                onClick={loadSecret}
+                                className="mt-1 px-5 py-2.5 rounded-full bg-primary text-on-primary text-sm font-bold hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                                {t('qrReveal.newCode')}
+                            </button>
+                        </div>
                     ) : showQr ? (
                         <div className="bg-surface-container-low p-8 rounded-[32px] inline-block mx-auto mb-6 border border-outline-variant/10 shadow-sm">
                             <QRCodeSVG
@@ -214,6 +234,12 @@ const QRReveal = ({ activeTrade, sellerToken, buyerToken, amount, counterpartyNa
                             <div className="mt-6">
                                 <h3 className="font-headline font-extrabold text-xl text-on-surface">{ownName ?? '—'}</h3>
                                 <p className="mt-2 font-headline font-black text-2xl text-on-surface">${amount} MXN</p>
+                                {qrCountdown && (
+                                    <p className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
+                                        <span aria-hidden="true" className="material-symbols-outlined text-[14px]">timer</span>
+                                        {t('qrReveal.codeExpiresIn', { time: qrCountdown })}
+                                    </p>
+                                )}
                                 {secretLoaded && (
                                     <p className="text-[10px] text-primary mt-1 font-mono opacity-70">
                                         {t('qrReveal.htlcTestnet')}
