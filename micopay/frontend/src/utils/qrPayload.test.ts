@@ -2,37 +2,37 @@ import { describe, it, expect, vi } from 'vitest';
 import { parseQRPayload } from './qrPayload';
 
 const TRADE_ID = '550e8400-e29b-41d4-a716-446655440000';
-const SECRET_64 = 'deadbeef'.repeat(8);
+const CLAIM_TOKEN_64 = 'deadbeef'.repeat(8);
 const HTLC_TX_HASH = 'a'.repeat(64);
 
 describe('parseQRPayload', () => {
   // ── Release format ─────────────────────────────────────────────────────
   describe('micopay://release', () => {
     it('parses a valid release QR', () => {
-      const raw = `micopay://release?trade_id=${TRADE_ID}&secret=${SECRET_64}`;
+      const raw = `micopay://release?trade_id=${TRADE_ID}&claim_token=${CLAIM_TOKEN_64}`;
       const result = parseQRPayload(raw);
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.payload.type).toBe('release');
         if (result.payload.type === 'release') {
           expect(result.payload.tradeId).toBe(TRADE_ID);
-          expect(result.payload.secret).toBe(SECRET_64);
+          expect(result.payload.claimToken).toBe(CLAIM_TOKEN_64);
         }
       }
     });
 
-    it('normalizes secret hex to lowercase', () => {
-      const upperSecret = 'DEADBEEF'.repeat(8);
-      const raw = `micopay://release?trade_id=${TRADE_ID}&secret=${upperSecret}`;
+    it('normalizes claim token hex to lowercase', () => {
+      const upperToken = 'DEADBEEF'.repeat(8);
+      const raw = `micopay://release?trade_id=${TRADE_ID}&claim_token=${upperToken}`;
       const result = parseQRPayload(raw);
       expect(result.ok).toBe(true);
       if (result.ok && result.payload.type === 'release') {
-        expect(result.payload.secret).toBe(SECRET_64);
+        expect(result.payload.claimToken).toBe(CLAIM_TOKEN_64);
       }
     });
 
     it('returns error when trade_id is missing', () => {
-      const raw = `micopay://release?secret=${SECRET_64}`;
+      const raw = `micopay://release?claim_token=${CLAIM_TOKEN_64}`;
       const result = parseQRPayload(raw);
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -41,7 +41,7 @@ describe('parseQRPayload', () => {
     });
 
     it('returns error when trade_id is not a UUID', () => {
-      const raw = `micopay://release?trade_id=abc-123&secret=${SECRET_64}`;
+      const raw = `micopay://release?trade_id=abc-123&claim_token=${CLAIM_TOKEN_64}`;
       const result = parseQRPayload(raw);
       expect(result.ok).toBe(false);
       if (!result.ok) {
@@ -49,21 +49,32 @@ describe('parseQRPayload', () => {
       }
     });
 
-    it('returns error when secret is missing', () => {
+    it('returns error when claim token is missing', () => {
       const raw = `micopay://release?trade_id=${TRADE_ID}`;
       const result = parseQRPayload(raw);
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.error).toContain('secreto HTLC');
+        expect(result.error).toContain('código de cobro');
       }
     });
 
-    it('rejects malformed secret (non-hex or wrong length)', () => {
-      const raw = `micopay://release?trade_id=${TRADE_ID}&secret=ZZZ`;
+    it('rejects malformed claim token (non-hex or wrong length)', () => {
+      const raw = `micopay://release?trade_id=${TRADE_ID}&claim_token=ZZZ`;
       const result = parseQRPayload(raw);
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error).toContain('64 caracteres');
+      }
+    });
+
+    // SEC-02: el formato viejo llevaba el preimage HTLC en la URL. Un QR así ya
+    // no debe abrir nada, aunque el hex sea válido.
+    it('rejects the legacy secret= payload', () => {
+      const raw = `micopay://release?trade_id=${TRADE_ID}&secret=${CLAIM_TOKEN_64}`;
+      const result = parseQRPayload(raw);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toContain('código de cobro');
       }
     });
   });
@@ -194,7 +205,7 @@ describe('parseQRPayload', () => {
     });
 
     it('trims whitespace before parsing', () => {
-      const raw = `  micopay://release?trade_id=${TRADE_ID}&secret=${SECRET_64}  `;
+      const raw = `  micopay://release?trade_id=${TRADE_ID}&claim_token=${CLAIM_TOKEN_64}  `;
       const result = parseQRPayload(raw);
       expect(result.ok).toBe(true);
     });

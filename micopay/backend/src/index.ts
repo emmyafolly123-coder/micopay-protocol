@@ -17,6 +17,7 @@ import { rateRoutes } from './routes/rate.js';
 import { kycRoutes } from './routes/kyc.js';
 import { rampRoutes } from './routes/ramp.js';
 import { signRequestsRoutes } from './routes/sign-requests.js';
+import { clientErrorRoutes } from './routes/client-errors.js';
 import { AppError } from './utils/errors.js';
 import { Keypair } from '@stellar/stellar-sdk';
 import fastifyStatic from '@fastify/static';
@@ -32,16 +33,31 @@ import { startComplianceJob, stopComplianceJob } from './services/compliance.ser
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 
+// SEC-02 pide redactar el material del QR en logs de API/proxy/analytics. Cubre
+// tanto el body de la request como cualquier objeto que se loguee con esas
+// claves (el preimage ya no viaja, pero el token de cobro sigue siendo una
+// capacidad de un solo uso).
+const LOG_REDACT_PATHS = [
+  'req.body.claim_token',
+  'claim_token',
+  'claimToken',
+  'qr_payload',
+  'qrPayload',
+  'secret',
+];
+
 const app = Fastify({
   trustProxy: true,
   logger: process.env.NODE_ENV === 'development' ? {
     level: 'info',
+    redact: LOG_REDACT_PATHS,
     transport: {
       target: 'pino-pretty',
       options: { colorize: true, translateTime: 'HH:MM:ss Z' },
     },
   } : {
     level: 'info',
+    redact: LOG_REDACT_PATHS,
     formatters: {
       bindings: (o) => ({ ...o, service: 'micopay-backend' }),
     },
@@ -234,6 +250,10 @@ app.register(rateRoutes, { prefix: '' });
 app.register(kycRoutes, { prefix: '' });
 app.register(rampRoutes, { prefix: '' });
 app.register(signRequestsRoutes, { prefix: '' });
+// El ErrorBoundary del frontend postea aquí; la ruta existía sin registrar, así
+// que hasta ahora todo reporte de crash caía en un 404
+// (docs/AUDIT_MOBILE_MAINNET.md §6, "Ruta backend definida pero no registrada").
+app.register(clientErrorRoutes, { prefix: '' });
 
 // --- Start server ---
 

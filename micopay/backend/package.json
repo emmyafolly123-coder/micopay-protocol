@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "build": "tsc",
+    "dev": "node init && tsx watch src/index.ts",
+    "start": "node init && node dist/index.js",
+    "build": "node init && tsc",
     "migrate": "tsx src/db/migrate.ts",
     "e2e": "node --import tsx ../scripts/e2e-test.ts",
     "test:rate-limit": "node --import tsx src/tests/rateLimit.test.ts",
@@ -16,13 +16,12 @@
     "test:compliance": "node --import tsx src/tests/compliance.test.ts",
     "test:kyc-didit": "node --import tsx src/tests/kyc-didit.test.ts",
     "test:security": "node --import tsx src/tests/security.test.ts",
-    "test:challenge": "node --import tsx src/tests/challenge.service.test.ts",
+    "test:challenge": "ALLOW_IN_MEMORY_DB=true MOCK_STELLAR=true SECRET_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 node --import tsx src/tests/challenge.service.test.ts",
     "test:challenge-signature": "node --import tsx src/tests/challengeSignature.test.ts",
     "test:sign-requests": "node --import tsx src/tests/signRequests.test.ts",
     "issue-device-key": "tsx src/scripts/issue-device-key.ts",
     "test:trade-auth": "ALLOW_IN_MEMORY_DB=true MOCK_STELLAR=true SECRET_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 node --import tsx src/tests/tradeAuth.test.ts",
     "test:refund": "ALLOW_IN_MEMORY_DB=true MOCK_STELLAR=true SECRET_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 node --import tsx src/tests/refund.test.ts",
-    "test:challenge": "ALLOW_IN_MEMORY_DB=true MOCK_STELLAR=true SECRET_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 node --import tsx src/tests/challenge.service.test.ts",
     "test:discovery": "ALLOW_IN_MEMORY_DB=true MOCK_STELLAR=true SECRET_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000 node --import tsx src/tests/merchant.discovery.test.ts"
   },
   "dependencies": {

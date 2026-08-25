@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getPublicKey } from '../lib/keystore';
+import { getUsdcMxnRate } from '../services/api';
 
 const HORIZON_URL = import.meta.env.VITE_HORIZON_URL || 'https://horizon-testnet.stellar.org';
 
@@ -23,14 +24,12 @@ export interface UseWalletBalanceResult {
 // Peso-pegged assets: treat 1 token = 1 MXN
 const MXN_PEGGED = new Set(['MXNE', 'MXNe', 'CETES', 'GTOKEN', 'MXN']);
 
-async function fetchUsdMxnRate(): Promise<number> {
-  const res = await fetch(
-    'https://api.coingecko.com/api/v3/simple/price?ids=usd-coin&vs_currencies=mxn',
-    { signal: AbortSignal.timeout(8000) }
-  );
-  const data = await res.json();
-  return data['usd-coin']?.mxn ?? 17.5;
-}
+/**
+ * El FX viene del backend (multi-fuente + caché), no de CoinGecko desde el
+ * dispositivo: llamarlo client-side comparte el rate limit por IP y obliga a
+ * inventar un fallback. Si no hay cotización, `usdMxnRate` queda en null y la
+ * UI muestra "—" (docs/AUDIT_MOBILE_MAINNET.md §3 y §5).
+ */
 
 export function useWalletBalance(): UseWalletBalanceResult {
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
@@ -43,7 +42,9 @@ export function useWalletBalance(): UseWalletBalanceResult {
   const refresh = useCallback(() => setTrigger((p) => p + 1), []);
 
   useEffect(() => {
-    fetchUsdMxnRate().then(setUsdMxnRate).catch(() => setUsdMxnRate(17.5));
+    getUsdcMxnRate()
+      .then(({ rate }) => setUsdMxnRate(rate))
+      .catch(() => setUsdMxnRate(null));
   }, []);
 
   useEffect(() => {

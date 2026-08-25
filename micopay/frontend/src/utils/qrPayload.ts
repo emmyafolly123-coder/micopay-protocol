@@ -2,7 +2,7 @@
  * QR payload parser for MicoPay protocol QR codes.
  *
  * Supported formats:
- *   - micopay://release?trade_id=<uuid>&secret=<hex64>
+ *   - micopay://release?trade_id=<uuid>&claim_token=<hex64>
  *   - micopay://claim?request_id=<id>&amount_mxn=<number>&htlc=<hash>
  *   - MICOPAY:<type>:<value>  (legacy demo format — demo builds only)
  *
@@ -15,7 +15,11 @@ import { isHex64, isHtlcReference, isRequestId, isUuid } from './qrValidation';
 export interface QRPayloadRelease {
   type: 'release';
   tradeId: string;
-  secret: string;
+  /**
+   * Token opaco de un solo uso. El preimage HTLC ya no viaja en el QR — ver
+   * docs/security-reports/SEC-02-htlc-secret-en-qr.md.
+   */
+  claimToken: string;
 }
 
 export interface QRPayloadClaim {
@@ -71,7 +75,7 @@ export function parseQRPayload(raw: string | null | undefined): QRParseResult {
 
       if (action === 'release') {
         const tradeId = url.searchParams.get('trade_id');
-        const secret = url.searchParams.get('secret');
+        const claimToken = url.searchParams.get('claim_token');
 
         if (!tradeId) {
           return { ok: false, error: 'El QR no contiene un ID de trade válido' };
@@ -79,19 +83,19 @@ export function parseQRPayload(raw: string | null | undefined): QRParseResult {
         if (!isUuid(tradeId)) {
           return { ok: false, error: 'El ID de trade no tiene un formato UUID válido' };
         }
-        if (!secret) {
-          return { ok: false, error: 'El QR no contiene el secreto HTLC' };
+        if (!claimToken) {
+          return { ok: false, error: 'El QR no contiene el código de cobro' };
         }
-        if (!isHex64(secret)) {
+        if (!isHex64(claimToken)) {
           return {
             ok: false,
-            error: 'El secreto HTLC debe ser una cadena hexadecimal de 64 caracteres',
+            error: 'El código de cobro debe ser una cadena hexadecimal de 64 caracteres',
           };
         }
 
         return {
           ok: true,
-          payload: { type: 'release', tradeId, secret: secret.toLowerCase() },
+          payload: { type: 'release', tradeId, claimToken: claimToken.toLowerCase() },
         };
       }
 

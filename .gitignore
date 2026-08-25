@@ -14,8 +14,6 @@ target/
 **/*.rs.bk
 
 # Secretos y Config
-.env
-.env.local
 
 # Agent demo wallet (Juanita Tienda) — local keypair + session token, never commit
 .agent-wallet/
@@ -42,3 +40,7 @@ walkthrough.md
 # IDE
 .idea/
 
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+config.bat

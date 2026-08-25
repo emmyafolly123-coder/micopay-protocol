@@ -4,12 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "build:dev": "tsc && vite build --mode development",
-    "build:testnet": "tsc && vite build --mode testnet",
-    "build:mainnet": "tsc && vite build --mode mainnet",
-    "build:prod": "tsc && vite build --mode production",
+    "dev": "node init && vite",
+    "build": "node init && tsc && vite build",
+    "build:dev": "node init && tsc && vite build --mode development",
+    "build:testnet": "node init && tsc && vite build --mode testnet",
+    "build:mainnet": "node init && tsc && vite build --mode mainnet",
+    "build:prod": "node init && tsc && vite build --mode production",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -35,7 +35,8 @@
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.8",
     "react-router-dom": "^6.28.0",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "xrpl": "^5.0.0"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
