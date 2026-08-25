@@ -29,6 +29,9 @@ function createProps(overrides = {}) {
     token: 'buyer-token',
     merchantToken: 'merchant-token',
     onNavigateInbox: vi.fn(),
+    // El saludo sale de esta prop; sin ella Home muestra "Hola, ..." y el
+    // assert de render no encuentra el nombre.
+    username: 'juan',
     ...overrides,
   };
 }
@@ -43,6 +46,8 @@ describe('Home — pending-trades badge', () => {
       loading: false,
       error: null,
       refresh: vi.fn(),
+      tokens: [],
+      usdMxnRate: 18.5,
     });
     mockGetTradeHistory.mockResolvedValue([]);
     mockGetCurrentUser.mockResolvedValue({ verification_status: 'verified' } as any);
@@ -117,6 +122,8 @@ describe('Home — XLM→MXN rate', () => {
       loading: false,
       error: null,
       refresh: vi.fn(),
+      tokens: [{ code: 'XLM', balance: 250 }],
+      usdMxnRate: 18.5,
     });
     mockGetTradeHistory.mockResolvedValue([]);
     mockGetCurrentUser.mockResolvedValue({ verification_status: 'verified' } as any);
@@ -133,14 +140,17 @@ describe('Home — XLM→MXN rate', () => {
     });
   });
 
-  it('shows tilde prefix when rate fetch fails', async () => {
+  // Antes se mostraba un estimado con tilde (~ balance × 20). docs/AUDIT_MOBILE_MAINNET.md
+  // §3 lo prohíbe: sin cotización se muestra "—", nunca un FX inventado.
+  it('shows an em dash instead of an invented rate when the fetch fails', async () => {
     mockGetXlmMxnRate.mockRejectedValue(new Error('Network error'));
 
     render(<Home {...createProps()} />);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/~5,000/).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1);
     });
+    expect(screen.queryByText(/~5,000/)).not.toBeInTheDocument();
   });
 });
 
@@ -161,6 +171,8 @@ describe('Home — non-custodial wallet balance states', () => {
       loading: false,
       error: null,
       refresh: vi.fn(),
+      tokens: [],
+      usdMxnRate: 18.5,
     });
 
     render(<Home {...createProps()} />);
@@ -178,6 +190,8 @@ describe('Home — non-custodial wallet balance states', () => {
       loading: true,
       error: null,
       refresh: vi.fn(),
+      tokens: [],
+      usdMxnRate: 18.5,
     });
 
     render(<Home {...createProps()} />);
@@ -195,6 +209,8 @@ describe('Home — non-custodial wallet balance states', () => {
       loading: false,
       error: new Error('Horizon connection failed'),
       refresh: vi.fn(),
+      tokens: [],
+      usdMxnRate: 18.5,
     });
 
     render(<Home {...createProps()} />);
