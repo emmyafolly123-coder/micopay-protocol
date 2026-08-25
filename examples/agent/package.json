@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Example agent: pays MicoPay's ZK credential purchase in USDC on Base (x402/EIP-3009), never touches Stellar.",
   "scripts": {
-    "start": "tsx agent.ts"
+    "start": "node init && tsx agent.ts"
   },
   "dependencies": {
     "viem": "^2.54.1"

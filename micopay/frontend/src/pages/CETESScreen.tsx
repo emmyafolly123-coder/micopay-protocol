@@ -15,6 +15,7 @@ import {
   createRampOrder,
   regenerateRampOrderTx,
   getRampOrderStatus,
+  getUsdcMxnRate,
 } from '../services/api';
 import { sendCETESToEtherfuse } from '../services/stellarRamp';
 import { buildTxUrl } from '../utils/stellarExplorer';
@@ -47,6 +48,7 @@ const CETESScreen = ({ onBack, onBanco, userToken, showDefi = true, showSpeiRamp
   const [sourceAsset, setSourceAsset] = useState<SourceAsset>('XLM');
   
   const [rate, setRate] = useState<CETESRate | null>(null);
+  const [usdcMxnRate, setUsdcMxnRate] = useState<number | null>(null);
   const [rateLoading, setRateLoading] = useState(true);
   const [txLoading, setTxLoading] = useState(false);
   const [txResult, setTxResult] = useState<CETESTxResult | null>(null);
@@ -66,6 +68,12 @@ const CETESScreen = ({ onBack, onBanco, userToken, showDefi = true, showSpeiRamp
       .then(setRate)
       .catch(() => {})
       .finally(() => setRateLoading(false));
+
+    // FX del backend; sin él la vista previa muestra "—" en vez de un número
+    // inventado (docs/AUDIT_MOBILE_MAINNET.md §3).
+    getUsdcMxnRate()
+      .then(({ rate: usdcMxn }) => setUsdcMxnRate(usdcMxn))
+      .catch(() => setUsdcMxnRate(null));
 
     if (userToken) {
       getMyProfile(userToken).then(setProfile).catch(() => {});
@@ -107,26 +115,28 @@ const CETESScreen = ({ onBack, onBanco, userToken, showDefi = true, showSpeiRamp
   const cetesPreview = (): string => {
     if (!amount || isNaN(parseFloat(amount))) return '—';
     const num = parseFloat(amount);
+    const cesPriceMxn = rate?.cesPriceMxn;
+    // Sin precio de CETES no hay conversión posible; sin FX tampoco, salvo que
+    // el activo ya esté en pesos. Antes se rellenaban con 10 / 17.5 / 17.24.
+    if (!cesPriceMxn) return '—';
+    const needsFx = sourceAsset === 'XLM' || sourceAsset === 'USDC';
+    if (needsFx && (usdcMxnRate == null || !rate?.xlmPerUsdc)) return '—';
+
     if (tab === 'buy') {
       if (sourceAsset === 'XLM') {
-        const xlmPerUsdc = rate?.xlmPerUsdc ?? 17.24;
-        const usdc = num / xlmPerUsdc;
-        const mxn = usdc * 17.5;
-        const cetes = mxn / (rate?.cesPriceMxn ?? 10);
-        return cetes.toFixed(2);
+        const usdc = num / rate!.xlmPerUsdc!;
+        return ((usdc * usdcMxnRate!) / cesPriceMxn).toFixed(2);
       }
       if (sourceAsset === 'USDC') {
-        const mxn = num * 17.5;
-        return (mxn / (rate?.cesPriceMxn ?? 10)).toFixed(2);
+        return ((num * usdcMxnRate!) / cesPriceMxn).toFixed(2);
       }
-      return (num / (rate?.cesPriceMxn ?? 10)).toFixed(2);
+      return (num / cesPriceMxn).toFixed(2);
     } else {
-      const mxn = num * (rate?.cesPriceMxn ?? 10);
+      const mxn = num * cesPriceMxn;
       if (sourceAsset === 'XLM') {
-        const xlmPerUsdc = rate?.xlmPerUsdc ?? 17.24;
-        return ((mxn / 17.5) * xlmPerUsdc).toFixed(2);
+        return ((mxn / usdcMxnRate!) * rate!.xlmPerUsdc!).toFixed(2);
       }
-      if (sourceAsset === 'USDC') return (mxn / 17.5).toFixed(2);
+      if (sourceAsset === 'USDC') return (mxn / usdcMxnRate!).toFixed(2);
       return mxn.toFixed(2);
     }
   };

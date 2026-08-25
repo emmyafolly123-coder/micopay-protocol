@@ -12,6 +12,9 @@ import {
 import { ensureTrustline } from '../services/payment';
 import { errorMessages } from '../constants/errorMessages';
 import { readJSON } from '../services/secureStorage';
+import { useCountdown } from '../hooks/useCountdown';
+import { buildTxUrl } from '../utils/stellarExplorer';
+import { mapApiError } from '../utils/apiError';
 
 type TradeDetailData = TradeDetailResponse['trade'] & {
   platform_fee_mxn?: number;
@@ -52,32 +55,6 @@ const TRADE_POLL_INTERVAL = 5000;
 const SUPPORT_EMAIL = 'support@micopay.io';
 
 const ACTIVE_STATES = ['pending', 'locked', 'revealing'];
-
-function useCountdown(expiresAt: string | null) {
-  const [remaining, setRemaining] = useState('');
-
-  useEffect(() => {
-    if (!expiresAt) return;
-
-    const tick = () => {
-      const diff = new Date(expiresAt).getTime() - Date.now();
-      if (diff <= 0) {
-        setRemaining('Expirado');
-        return;
-      }
-      const h = Math.floor(diff / 3_600_000);
-      const m = Math.floor((diff % 3_600_000) / 60_000);
-      const s = Math.floor((diff % 60_000) / 1000);
-      setRemaining(h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`);
-    };
-
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [expiresAt]);
-
-  return remaining;
-}
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
   pending: { label: 'Pendiente', color: '#f59e0b', icon: 'hourglass_top' },
@@ -141,7 +118,8 @@ function PendingView({
   locking: boolean;
   lockError: string | null;
 }) {
-  const countdown = useCountdown(trade.expires_at ?? null);
+  const { label: countdownLabel, expired: countdownExpired } = useCountdown(trade.expires_at ?? null);
+  const countdown = countdownExpired ? 'Expirado' : countdownLabel;
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -212,7 +190,6 @@ function PendingView({
 }
 
 function LockedView({ trade }: { trade: TradeDetailData }) {
-  const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet/tx';
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -228,7 +205,7 @@ function LockedView({ trade }: { trade: TradeDetailData }) {
 
       {trade.lock_tx_hash && (
         <a
-          href={`${STELLAR_EXPLORER}/${trade.lock_tx_hash}`}
+          href={buildTxUrl(trade.lock_tx_hash)}
           target="_blank"
           rel="noopener noreferrer"
           className="text-primary text-sm font-semibold hover:underline mb-6 flex items-center gap-1"
@@ -271,19 +248,30 @@ function RevealingView({ trade }: { trade: TradeDetailData }) {
 
 function RevealedView({ trade, onComplete, token }: { trade: TradeDetailData; onComplete: () => void; token: string | null }) {
   const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
+  // La pantalla sólo avanza a "completado" si el release confirmó de verdad.
+  // Antes el catch sólo logueaba y el finally transicionaba igual, así que un
+  // release fallido —o la falta de token— se mostraba como éxito
+  // (docs/AUDIT_MOBILE_MAINNET.md §4, "honestidad sobre fondos").
   const handleConfirm = async () => {
     if (isConfirming) return;
     setIsConfirming(true);
+    setConfirmError(null);
     try {
       const effectiveToken = token ?? (await getStoredToken());
-      if (effectiveToken) {
-        await completeTrade(trade.id, effectiveToken);
-      }
-    } catch (e) {
-      console.warn('Could not complete trade on backend', e);
-    } finally {
+      if (!effectiveToken) throw new Error('NO_TOKEN');
+      await completeTrade(trade.id, effectiveToken);
       setTimeout(() => onComplete(), 1500);
+    } catch (e) {
+      setIsConfirming(false);
+      // El motivo lo traduce mapApiError (el mapeo de errores del repo); lo
+      // único que se añade es dónde quedó el dinero, que UX_MANIFESTO exige
+      // decir en todo estado de error.
+      const reason = e instanceof Error && e.message === 'NO_TOKEN'
+        ? 'Tu sesión expiró. Vuelve a entrar para confirmar.'
+        : mapApiError(e).message;
+      setConfirmError(`${reason} El dinero sigue retenido en la garantía.`);
     }
   };
 
@@ -299,15 +287,22 @@ function RevealedView({ trade, onComplete, token }: { trade: TradeDetailData; on
         ¿Ya recibiste el efectivo? Confirma para liberar los fondos al vendedor.
       </p>
 
+      {confirmError && (
+        <div className="w-full mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-left">
+          <p className="text-sm font-semibold text-red-800">No se pudo confirmar</p>
+          <p className="mt-1 text-sm text-red-700">{confirmError}</p>
+        </div>
+      )}
+
       {!isConfirming ? (
         <button
           onClick={handleConfirm}
           className="w-full py-3 rounded-xl bg-primary text-white font-semibold hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
         >
           <span className="material-symbols-outlined" style={{ fontVariationSettings: '"FILL" 1' }}>
-            check_circle
+            {confirmError ? 'refresh' : 'check_circle'}
           </span>
-          Ya recibí el efectivo
+          {confirmError ? 'Reintentar' : 'Ya recibí el efectivo'}
         </button>
       ) : (
         <div className="flex flex-col items-center gap-3 py-4">
@@ -323,7 +318,6 @@ function RevealedView({ trade, onComplete, token }: { trade: TradeDetailData; on
 }
 
 function CompletedView({ trade }: { trade: TradeDetailData }) {
-  const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet/tx';
 
   return (
     <div className="flex flex-col items-center text-center">
@@ -350,7 +344,7 @@ function CompletedView({ trade }: { trade: TradeDetailData }) {
 
       {trade.release_tx_hash && (
         <a
-          href={`${STELLAR_EXPLORER}/${trade.release_tx_hash}`}
+          href={buildTxUrl(trade.release_tx_hash)}
           target="_blank"
           rel="noopener noreferrer"
           className="text-primary text-sm font-semibold hover:underline mb-6 flex items-center gap-1"
@@ -461,7 +455,6 @@ function ExpiredView({ canRefund, onRefund, refunding, trade, title, description
 }
 
 function RefundedView({ trade }: { trade: TradeDetailData }) {
-  const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet/tx';
   const refundTxHash = trade.release_tx_hash;
 
   return (
@@ -489,7 +482,7 @@ function RefundedView({ trade }: { trade: TradeDetailData }) {
 
       {refundTxHash && (
         <a
-          href={`${STELLAR_EXPLORER}/${refundTxHash}`}
+          href={buildTxUrl(refundTxHash)}
           target="_blank"
           rel="noopener noreferrer"
           className="text-primary text-sm font-semibold hover:underline mb-6 flex items-center gap-1"
