@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import TradeDetail from '../pages/TradeDetail';
-import * as api from '../services/api';
 
 const mockGetTrade = vi.fn();
+const mockCompleteTrade = vi.fn();
 
 // Mock the API module
 vi.mock('../services/api', () => ({
@@ -12,10 +12,26 @@ vi.mock('../services/api', () => ({
     const trade = await mockGetTrade(id, token);
     return { trade, merchant_unavailable: false, seller_username: 'seller-username' };
   }),
-  completeTrade: vi.fn(),
+  completeTrade: (...args: unknown[]) => mockCompleteTrade(...args),
   cancelTradeRequest: vi.fn(),
   refundTradeRequest: vi.fn(),
-  getToken: vi.fn(),
+  lockTrade: vi.fn(),
+}));
+
+vi.mock('../services/payment', () => ({
+  ensureTrustline: vi.fn(),
+}));
+
+// La sesión vive en secure storage (Keychain/Keystore en nativo) bajo la clave
+// `micopay_user` con shape plano — no en `localStorage.micopay_users`, que era
+// el artefacto de doble identidad del demo (SEC-22, SEC-26 y el fix del
+// interceptor 401 en docs/AUDIT_MOBILE_MAINNET.md §2).
+const mockReadJSON = vi.fn(async () => ({ id: 'buyer-1', token: 'mock-token' }));
+
+vi.mock('../services/secureStorage', () => ({
+  readJSON: (...args: unknown[]) => mockReadJSON(...(args as [])),
+  writeJSON: vi.fn(),
+  removeKey: vi.fn(),
 }));
 
 // Robust localStorage mock for tests
@@ -39,7 +55,6 @@ if (global.window) {
   });
 }
 
-const mockGetToken = vi.mocked(api.getToken);
 
 const createMockTrade = (status: string) => ({
   id: 'trade-123',
@@ -72,13 +87,11 @@ describe('TradeDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    localStorage.setItem('micopay_users', JSON.stringify({ buyer: { token: 'mock-token', id: 'buyer-1' } }));
   });
 
   describe('Route registration', () => {
     it('should render TradeDetail when navigating to /trade/:id', async () => {
-      mockGetToken.mockReturnValue('mock-token');
-      mockGetTrade.mockResolvedValue(createMockTrade('pending'));
+        mockGetTrade.mockResolvedValue(createMockTrade('pending'));
 
       renderWithRouter('/trade/test-trade-id');
 
@@ -92,8 +105,7 @@ describe('TradeDetail', () => {
     });
 
     it('should correctly read trade ID from URL params', async () => {
-      mockGetToken.mockReturnValue('mock-token');
-      mockGetTrade.mockResolvedValue(createMockTrade('pending'));
+        mockGetTrade.mockResolvedValue(createMockTrade('pending'));
 
       renderWithRouter('/trade/unique-trade-456');
 
@@ -104,10 +116,6 @@ describe('TradeDetail', () => {
   });
 
   describe('State rendering', () => {
-    beforeEach(() => {
-      mockGetToken.mockReturnValue('mock-token');
-    });
-
     it('should render pending state with cancel button', async () => {
       mockGetTrade.mockResolvedValue(createMockTrade('pending'));
 
@@ -168,8 +176,11 @@ describe('TradeDetail', () => {
       });
     });
 
-    it('should render cancelled state', async () => {
-      mockGetTrade.mockResolvedValue(createMockTrade('cancelled'));
+    it('should render cancelled state when no funds were ever locked', async () => {
+      mockGetTrade.mockResolvedValue({
+        ...createMockTrade('cancelled'),
+        lock_tx_hash: null,
+      });
 
       renderWithRouter();
 
@@ -180,9 +191,24 @@ describe('TradeDetail', () => {
       });
     });
 
+    // Finding B3 de docs/AUDIT_MOBILE_MAINNET.md: cancelar un trade ya
+    // bloqueado dejaba los fondos atrapados sin ruta de recuperación. Ahora esa
+    // combinación (lock sin release) ofrece el refund a cualquiera de los dos
+    // participantes.
+    it('should offer refund for a cancelled trade with funds still locked', async () => {
+      mockGetTrade.mockResolvedValue(createMockTrade('cancelled'));
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(screen.getByText(/reembolso pendiente/i)).toBeInTheDocument();
+        expect(screen.getByText(/recuperarlos ahora/i)).toBeInTheDocument();
+        expect(screen.getByText(/recuperar fondos/i)).toBeInTheDocument();
+      });
+    });
+
     it('should render expired state', async () => {
       mockGetTrade.mockResolvedValue(createMockTrade('expired'));
-      localStorage.setItem('micopay_users', JSON.stringify({ buyer: { token: 'mock-token', id: 'buyer-different' } }));
 
       renderWithRouter();
 
@@ -194,11 +220,52 @@ describe('TradeDetail', () => {
     });
   });
 
-  describe('Error handling', () => {
-    beforeEach(() => {
-      mockGetToken.mockReturnValue('mock-token');
+  // docs/AUDIT_MOBILE_MAINNET.md §4: "RevealedView muestra éxito aunque
+  // completeTrade falle". La pantalla no debe declarar liberados unos fondos
+  // que siguen en el contrato.
+  describe('Confirmación de recepción', () => {
+    it('does not report success when the release fails', async () => {
+      mockGetTrade.mockResolvedValue(createMockTrade('revealed'));
+      mockCompleteTrade.mockRejectedValue(new Error('on-chain release failed'));
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(screen.getByText(/ya recibí el efectivo/i)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText(/ya recibí el efectivo/i));
+
+      await waitFor(() => {
+        expect(screen.getByText(/no se pudo confirmar/i)).toBeInTheDocument();
+      });
+
+      // Sigue diciendo dónde está el dinero y deja reintentar.
+      expect(screen.getByText(/sigue retenido en la garantía/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /reintentar/i })).toBeInTheDocument();
+      expect(screen.queryByText(/operación completada/i)).not.toBeInTheDocument();
     });
 
+    it('confirms when the release succeeds', async () => {
+      mockGetTrade.mockResolvedValue(createMockTrade('revealed'));
+      mockCompleteTrade.mockResolvedValue({ status: 'completed', release_tx_hash: 'hash' });
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(screen.getByText(/ya recibí el efectivo/i)).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText(/ya recibí el efectivo/i));
+
+      await waitFor(() => {
+        expect(mockCompleteTrade).toHaveBeenCalledWith('trade-123', 'mock-token');
+      });
+      expect(screen.queryByText(/no se pudo confirmar/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Error handling', () => {
     it('should show 404 screen when trade is not found', async () => {
       const error = new Error('Not found');
       (error as any).response = { status: 404 };
@@ -243,8 +310,7 @@ describe('TradeDetail', () => {
 
   describe('Auth recovery', () => {
     it('should redirect to home when not authenticated', async () => {
-      mockGetToken.mockReturnValue(null);
-      localStorage.removeItem('micopay_users');
+      mockReadJSON.mockResolvedValueOnce(null as never);
 
       renderWithRouter('/trade/trade-123');
 
@@ -254,8 +320,7 @@ describe('TradeDetail', () => {
     });
 
     it('should not redirect when user is authenticated', async () => {
-      mockGetToken.mockReturnValue('mock-token');
-      mockGetTrade.mockResolvedValue(createMockTrade('pending'));
+        mockGetTrade.mockResolvedValue(createMockTrade('pending'));
 
       renderWithRouter('/trade/trade-123');
 
@@ -267,10 +332,6 @@ describe('TradeDetail', () => {
   });
 
   describe('Support link visibility', () => {
-    beforeEach(() => {
-      mockGetToken.mockReturnValue('mock-token');
-    });
-
     const states = ['pending', 'locked', 'revealing', 'revealed'];
 
     states.forEach((state) => {

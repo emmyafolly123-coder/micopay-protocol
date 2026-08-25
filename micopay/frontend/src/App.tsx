@@ -755,6 +755,8 @@ function App() {
   const [backendUrl, setBackendUrl] = useState("");
   const [debugOpen, setDebugOpen] = useState(false);
   const envName = import.meta.env.MODE;
+  /** Modos que operan contra dinero real: nunca deben caer a mocks. */
+  const STRICT_STARTUP_MODES = new Set(['production', 'mainnet']);
 
   useEffect(() => {
     const initUsers = async () => {
@@ -808,8 +810,11 @@ function App() {
         console.warn("Backend not reachable during startup:", err);
         setBackendConnected(false);
         
-        // In production, force-block if backend is down.
-        if (envName === 'production') {
+        // Bloquear si el backend está caído. `build:mainnet` compila con
+        // --mode mainnet, así que MODE es 'mainnet', no 'production': sin
+        // incluirlo, el APK de mainnet caía a mocks en silencio
+        // (docs/AUDIT_MOBILE_MAINNET.md §3).
+        if (STRICT_STARTUP_MODES.has(envName)) {
           setStartupError({
             title: "Servidor Inalcanzable",
             message: "No se pudo conectar al servidor de Micopay.",
